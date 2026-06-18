@@ -1,0 +1,11 @@
+server import failed Error: Erreur de creation du projet: TypeError: fetch failed
+    at u (E:\mes logiciels\musique\Fl et Waw\documents\samy-project\Site Web\samy-shoot-237-master\.next\server\app\page.js:1:35739)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async m (E:\mes logiciels\musique\Fl et Waw\documents\samy-project\Site Web\samy-shoot-237-master\.next\server\app\api\admin\import\route.js:1:1528)
+    at async E:\mes logiciels\musique\Fl et Waw\documents\samy-project\Site Web\samy-shoot-237-master\node_modules\next\dist\compiled\next-server\app-route.runtime.prod.js:6:38411
+    at async e_.execute (E:\mes logiciels\musique\Fl et Waw\documents\samy-project\Site Web\samy-shoot-237-master\node_modules\next\dist\compiled\next-server\app-route.runtime.prod.js:6:27880)
+    at async e_.handle (E:\mes logiciels\musique\Fl et Waw\documents\samy-project\Site Web\samy-shoot-237-master\node_modules\next\dist\compiled\next-server\app-route.runtime.prod.js:6:39943)
+    at async doRender (E:\mes logiciels\musique\Fl et Waw\documents\samy-project\Site Web\samy-shoot-237-master\node_modules\next\dist\server\base-server.js:1366:42)
+    at async cacheEntry.responseCache.get.routeKind (E:\mes logiciels\musique\Fl et Waw\documents\samy-project\Site Web\samy-shoot-237-master\node_modules\next\dist\server\base-server.js:1588:28)
+    at async NextNodeServer.renderToResponseWithComponentsImpl (E:\mes logiciels\musique\Fl et Waw\documents\samy-project\Site Web\samy-shoot-237-master\node_modules\next\dist\server\base-server.js:1496:28)
+    at async NextNodeServer.renderPageComponent (E:\mes logiciels\musique\Fl et Waw\documents\samy-project\Site Web\samy-shoot-237-master\node_modules\next\dist\server\base-server.js:1924:24)
