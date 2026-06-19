@@ -1,6 +1,7 @@
 import "server-only";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
+import { getDataDir } from "./data-dir";
 
 export type SavedSelection = {
   id: string;
@@ -16,7 +17,7 @@ export type SavedSelection = {
 
 type SelectionsData = { selections: SavedSelection[] };
 
-const dataDir = path.join(process.cwd(), "data");
+const dataDir = getDataDir();
 const selectionsFile = path.join(dataDir, "selections.json");
 
 async function readSelections(): Promise<SavedSelection[]> {

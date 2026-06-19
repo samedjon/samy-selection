@@ -27,7 +27,8 @@ function LoginForm() {
         body: JSON.stringify({ email, password })
       });
 
-      const data = await response.json() as { ok: boolean; message?: string; noAccount?: boolean };
+      let data: any = { ok: false, message: "Reponse serveur vide." };
+      try { data = await response.json(); } catch { setError("Erreur de lecture de la reponse."); return; }
 
       if (!response.ok || !data.ok) {
         setError(data.message || "Email ou mot de passe incorrect.");

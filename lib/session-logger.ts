@@ -1,6 +1,7 @@
 import "server-only";
 import { mkdir, readFile, writeFile, appendFile } from "fs/promises";
 import path from "path";
+import { getDataDir } from "./data-dir";
 
 export type LogLevel = "info" | "warn" | "error" | "debug";
 
@@ -12,7 +13,7 @@ export type LogEntry = {
   details?: Record<string, unknown>;
 };
 
-const dataDir = path.join(process.cwd(), "data");
+const dataDir = getDataDir();
 const logDir = path.join(dataDir, "logs");
 const logFile = path.join(logDir, "session.log");
 const entriesFile = path.join(logDir, "entries.json");

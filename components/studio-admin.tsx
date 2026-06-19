@@ -91,7 +91,8 @@ export default function StudioAdmin({ user }: { user: { email: string; name: str
   async function refreshServerProjects() {
     try {
       const response = await fetch("/api/admin/projects", { cache: "no-store" });
-      const payload = (await response.json()) as { ok: boolean; projects?: Project[] };
+      let payload: any = { ok: false, projects: [] };
+      try { payload = await response.json(); } catch { /* ignore */ }
       if (payload.ok) setServerProjects(payload.projects ?? []);
     } catch {
       setServerProjects([]);
@@ -101,7 +102,8 @@ export default function StudioAdmin({ user }: { user: { email: string; name: str
   async function refreshSelections() {
     try {
       const response = await fetch("/api/admin/selections", { cache: "no-store" });
-      const payload = (await response.json()) as { ok: boolean; selections?: SavedSelection[] };
+      let payload: any = { ok: false, selections: [] };
+      try { payload = await response.json(); } catch { /* ignore */ }
       if (payload.ok) setSavedSelections(payload.selections ?? []);
     } catch {
       setSavedSelections([]);
@@ -111,7 +113,8 @@ export default function StudioAdmin({ user }: { user: { email: string; name: str
   async function refreshLogs() {
     try {
       const response = await fetch("/api/admin/logs?count=100", { cache: "no-store" });
-      const payload = (await response.json()) as { ok: boolean; logs?: any[] };
+      let payload: any = { ok: false, logs: [] };
+      try { payload = await response.json(); } catch { /* ignore */ }
       if (payload.ok) setLogs(payload.logs ?? []);
     } catch {
       setLogs([]);
@@ -209,7 +212,14 @@ export default function StudioAdmin({ user }: { user: { email: string; name: str
         method: "POST",
         body: formData
       });
-      const payload = (await response.json()) as { ok: boolean; message?: string; project?: Project };
+      let payload: any = { ok: false, message: "Reponse serveur vide." };
+      try {
+        payload = await response.json();
+      } catch {
+        const text = await response.text().catch(() => "");
+        setMessage(text ? `Reponse inattendue: ${text.slice(0, 200)}` : `Erreur serveur (${response.status}).`);
+        return;
+      }
       if (!response.ok || !payload.ok || !payload.project) {
         setMessage(payload.message ?? "Import serveur impossible.");
         return;

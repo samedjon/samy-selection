@@ -6,8 +6,10 @@ import { mkdir, readFile, rm, writeFile } from "fs/promises";
 import path from "path";
 import type { Folder, Photo, PriceTier, Project, SelectionType } from "@/types/selection";
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { getDataDir } from "./data-dir";
 
-const dataDir = path.join(process.cwd(), "data");
+const dataDir = getDataDir();
 const projectsFile = path.join(dataDir, "projects.json");
 const uploadsDir = path.join(process.cwd(), "public", "uploads");
 
@@ -187,8 +189,9 @@ async function findProjectFromSupabase(projectId: string): Promise<Project | und
 }
 
 async function createProjectInSupabase(input: CreateServerProjectInput, photos: Photo[], folders: Folder[]): Promise<Project> {
-  const supabase = createClient();
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  const supabase = createSupabaseClient(supabaseUrl, supabaseKey);
 
   const priceGridJson = JSON.stringify(defaultPriceGrid);
 
@@ -280,7 +283,10 @@ async function createProjectInSupabase(input: CreateServerProjectInput, photos: 
 }
 
 async function updateProjectInSupabase(projectId: string, patch: Partial<Project>): Promise<Project | undefined> {
-  const supabase = createClient();
+  const supabase = createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+    process.env.SUPABASE_SERVICE_ROLE_KEY || ""
+  );
   const updates: Record<string, any> = {};
 
   if (patch.coupleName !== undefined) updates.couple_name = patch.coupleName;
@@ -301,7 +307,10 @@ async function updateProjectInSupabase(projectId: string, patch: Partial<Project
 }
 
 async function deleteProjectFromSupabase(projectId: string): Promise<boolean> {
-  const supabase = createClient();
+  const supabase = createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+    process.env.SUPABASE_SERVICE_ROLE_KEY || ""
+  );
   const { error } = await supabase.from("projects").delete().eq("id", projectId);
   return !error;
 }

@@ -4,8 +4,9 @@ import bcrypt from "bcryptjs";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { getDataDir } from "./data-dir";
 
-const dataDir = path.join(process.cwd(), "data");
+const dataDir = getDataDir();
 const usersFile = path.join(dataDir, "users.json");
 
 export type StoredUser = {

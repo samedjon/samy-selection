@@ -282,7 +282,8 @@ export default function SelectionPortal({ projects, isAdmin, adminUser }: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectId: activeProject.id, selections })
       });
-      const data = (await response.json()) as { message?: string };
+      let data: any = { message: "" };
+      try { data = await response.json(); } catch { setConfirmMessage("Erreur de lecture de la reponse."); return; }
       setConfirmMessage(data.message ?? "");
       setConfirmedProject(activeProject);
       setStep("confirmed");

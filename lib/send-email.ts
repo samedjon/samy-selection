@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
+import { getDataDir } from "./data-dir";
 
 type EmailPayload = {
   to: string;
@@ -8,7 +9,7 @@ type EmailPayload = {
   text: string;
 };
 
-const dataDir = path.join(process.cwd(), "data");
+const dataDir = getDataDir();
 const outboxDir = path.join(dataDir, "outbox");
 const outboxFile = path.join(outboxDir, "emails.json");
 
