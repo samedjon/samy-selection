@@ -5,9 +5,21 @@ import { requireAdminAuth } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 
+function debugFormKeys(formData: FormData): string {
+  const keys: string[] = [];
+  for (const key of formData.keys()) {
+    if (!keys.includes(key)) keys.push(key);
+  }
+  return keys.join(", ");
+}
+
 function readString(formData: FormData, key: string, fallback = "") {
-  const value = formData.get(key);
-  return typeof value === "string" ? value : fallback;
+  try {
+    const value = formData.get(key);
+    return typeof value === "string" ? value : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 function readNumber(formData: FormData, key: string, fallback: number) {
@@ -43,7 +55,9 @@ export async function POST(request: Request) {
 
     const accessCode = readString(formData, "accessCode");
     if (!/^\d{4}$/.test(accessCode)) {
-      return NextResponse.json({ ok: false, message: "Code client invalide." }, { status: 400 });
+      const keys = debugFormKeys(formData);
+      console.error(`Import 400: accessCode="${accessCode}" keys=[${keys}] files=${files.length}`);
+      return NextResponse.json({ ok: false, message: "Code client invalide ou manquant." }, { status: 400 });
     }
 
     const projectName = readString(formData, "projectName", "Projet Samy");
@@ -122,7 +136,8 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ok: true, project });
   } catch (error) {
-    console.error("server import failed", error);
-    return NextResponse.json({ ok: false, message: error instanceof Error ? error.message : "Import impossible." }, { status: 500 });
+    const msg = error instanceof Error ? error.message : "Import impossible.";
+    console.error("server import failed:", msg, error);
+    return NextResponse.json({ ok: false, message: msg }, { status: 500 });
   }
 }

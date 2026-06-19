@@ -6,6 +6,7 @@ import { buildStudioMessage } from "@/lib/whatsapp";
 import { calculateExtraPrice } from "@/lib/demo-data";
 import { saveSelection } from "@/lib/selections-store";
 import { sendEmail } from "@/lib/send-email";
+import { getCurrentUser } from "@/lib/admin-auth";
 import { logInfo, logWarn, logError } from "@/lib/session-logger";
 
 const schema = z.object({
@@ -55,17 +56,27 @@ export async function POST(request: Request) {
     });
 
     // Try to send email notification
-    const emailTarget = project.notificationEmail;
-    if (emailTarget) {
-      const sent = await sendEmail({
-        to: emailTarget,
-        subject: `Selection photo recue - ${project.coupleName}`,
-        text: message
-      });
-      if (sent) {
-        await logInfo("email", "Email envoye", { to: emailTarget, project: project.coupleName });
-      } else {
-        await logWarn("email", "Email non envoye (SMTP non configure)", { to: emailTarget });
+    const emailTargets: string[] = [];
+    if (project.notificationEmail) emailTargets.push(project.notificationEmail);
+    const adminUser = getCurrentUser();
+    if (adminUser?.email && !emailTargets.includes(adminUser.email)) {
+      emailTargets.push(adminUser.email);
+    }
+
+    for (const to of emailTargets) {
+      try {
+        const sent = await sendEmail({
+          to,
+          subject: `Selection photo recue - ${project.coupleName}`,
+          text: message
+        });
+        if (sent) {
+          await logInfo("email", "Email envoye", { to, project: project.coupleName });
+        } else {
+          await logWarn("email", "Email non envoye (SMTP non configure)", { to });
+        }
+      } catch (e) {
+        await logError("email", "Erreur envoi email", { to, error: String(e) });
       }
     }
 
