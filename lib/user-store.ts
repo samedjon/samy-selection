@@ -3,7 +3,7 @@ import "server-only";
 import bcrypt from "bcryptjs";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
-import { createClient } from "@/lib/supabase/server";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 const dataDir = path.join(process.cwd(), "data");
 const usersFile = path.join(dataDir, "users.json");
@@ -43,9 +43,15 @@ async function writeUsers(users: StoredUser[]) {
 
 // ---- Exports ----
 
+function createServiceRoleClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  return createSupabaseClient(url, key);
+}
+
 export async function findUserByEmail(email: string): Promise<StoredUser | undefined> {
   if (isSupabaseConfigured()) {
-    const supabase = createClient();
+    const supabase = createServiceRoleClient();
     const { data } = await supabase.from("admin_users").select("*").eq("email", email.toLowerCase()).single();
     if (data) {
       return {
@@ -73,7 +79,7 @@ export async function createUser(email: string, name: string, password: string):
   };
 
   if (isSupabaseConfigured()) {
-    const supabase = createClient();
+    const supabase = createServiceRoleClient();
     const { data, error } = await supabase
       .from("admin_users")
       .insert({ email: user.email, name: user.name, password_hash: user.passwordHash })
