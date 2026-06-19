@@ -17,6 +17,8 @@ function getConfig() {
   };
 }
 
+cloudinary.config(getConfig());
+
 export async function uploadToCloudinary(
   file: File,
   folder: string
