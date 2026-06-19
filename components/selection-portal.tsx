@@ -36,13 +36,25 @@ const stepConfig: Record<string, { title: string; short: string; hint: string }>
 
 const stepOrder: Step[] = ["free", "start", "premium", "enlargement", "summary"];
 
-export default function SelectionPortal({ projects, isAdmin, adminUser }: {
+export default function SelectionPortal({ projects, isAdmin: serverIsAdmin }: {
   projects: Project[];
   isAdmin?: boolean;
-  adminUser?: { email: string; name: string } | null;
 }) {
   const [availableProjects, setAvailableProjects] = useState<Project[]>(projects);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
+
+  const [isAdmin, setIsAdmin] = useState(!!serverIsAdmin);
+  useEffect(() => {
+    if (serverIsAdmin) { setIsAdmin(true); return; }
+    try {
+      const raw = document.cookie.split("; ").find((r) => r.startsWith("samy_admin_session="));
+      if (raw) {
+        const value = decodeURIComponent(raw.split("=")[1]);
+        const parsed = JSON.parse(value);
+        if (parsed.email && parsed.name) setIsAdmin(true);
+      }
+    } catch { /* not admin */ }
+  }, [serverIsAdmin]);
   const [pendingProject, setPendingProject] = useState<Project | null>(null);
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");

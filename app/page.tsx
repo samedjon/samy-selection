@@ -1,26 +1,30 @@
-import { cookies } from "next/headers";
+"use client";
+
+import { useEffect, useState } from "react";
 import SelectionPortal from "@/components/selection-portal";
-import { listActiveServerProjects } from "@/lib/server-project-store";
+import type { Project } from "@/types/selection";
 
 export const dynamic = "force-dynamic";
 
-export default async function HomePage() {
-  const cookieStore = cookies();
-  const raw = cookieStore.get("samy_admin_session")?.value;
-  let isAdmin = false;
-  let adminUser: { email: string; name: string } | null = null;
-  try {
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed.email && parsed.name) {
-        isAdmin = true;
-        adminUser = { email: parsed.email, name: parsed.name };
-      }
-    }
-  } catch {
-    if (raw === "authenticated") isAdmin = true;
+export default function HomePage() {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/projects")
+      .then((res) => res.json())
+      .then((data) => { setProjects(Array.isArray(data) ? data : []); })
+      .catch(() => setProjects([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-studio">
+        <p className="text-ink/60">Chargement...</p>
+      </div>
+    );
   }
 
-  const serverProjects = await listActiveServerProjects();
-  return <SelectionPortal projects={serverProjects} isAdmin={isAdmin} adminUser={adminUser} />;
+  return <SelectionPortal projects={projects} isAdmin={false} />;
 }
