@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, FolderOpen, FolderUp, ImageIcon, Loader2, LogOut, MessageCircle, Pencil, RotateCcw, Terminal, Trash2, UploadCloud, User, XCircle } from "lucide-react";
+import { Archive, Cloud, FolderOpen, FolderUp, ImageIcon, Loader2, LogOut, MessageCircle, Pencil, RotateCcw, Terminal, Trash2, UploadCloud, User, XCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import type { Project } from "@/types/selection";
@@ -51,6 +51,8 @@ export default function StudioAdmin({ user }: { user: { email: string; name: str
   const [isDragging, setIsDragging] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isServerImporting, setIsServerImporting] = useState(false);
+  const [isDriveImporting, setIsDriveImporting] = useState(false);
+  const [driveUploadProgress, setDriveUploadProgress] = useState<{ projectId: string; progress: number } | null>(null);
   const [message, setMessage] = useState("");
   const [projects, setProjects] = useState<Project[]>([]);
   const [serverProjects, setServerProjects] = useState<Project[]>([]);
@@ -66,6 +68,26 @@ export default function StudioAdmin({ user }: { user: { email: string; name: str
     void refreshServerProjects();
     void refreshSelections();
   }, []);
+
+  useEffect(() => {
+    if (!isDriveImporting || !driveUrl) return;
+    const interval = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/admin/drive-import?projectId=${encodeURIComponent(driveUrl)}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.ok && data.progress !== undefined) {
+            setDriveUploadProgress({ projectId: data.state?.projectId || "unknown", progress: data.progress });
+            if (data.completed) {
+              clearInterval(interval);
+              setIsDriveImporting(false);
+            }
+          }
+        }
+      } catch { }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [isDriveImporting, driveUrl]);
 
   const imageFiles = useMemo(() => files.filter(isImageFile), [files]);
   const folderPreview = useMemo(() => {
@@ -232,6 +254,43 @@ export default function StudioAdmin({ user }: { user: { email: string; name: str
       setMessage(error instanceof Error ? error.message : "Import serveur impossible.");
     } finally {
       setIsServerImporting(false);
+    }
+  }
+
+  async function handleDriveImport() {
+    setMessage("");
+    if (!driveUrl) {
+      setMessage("Renseigne le lien Google Drive avant de continuer.");
+      return;
+    }
+
+    setIsDriveImporting(true);
+    setDriveUploadProgress(null);
+    
+    try {
+      const response = await fetch(`/api/admin/drive-import?driveUrl=${encodeURIComponent(driveUrl)}`, {
+        method: "POST",
+      });
+      let payload: any = { ok: false, message: "Réponse serveur vide." };
+      try {
+        payload = await response.json();
+      } catch {
+        const text = await response.text().catch(() => "");
+        setMessage(text ? `Réponse inattendue: ${text.slice(0, 200)}` : `Erreur serveur (${response.status}).`);
+        return;
+      }
+      if (!response.ok || !payload.ok) {
+        setMessage(payload.message ?? "Import Drive impossible.");
+        return;
+      }
+
+      setMessage(`Projet Drive "${payload.project.coupleName}" importé : ${payload.files} image(s). Ouvre le portail client.`);
+      await refreshServerProjects();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Import Drive impossible.");
+    } finally {
+      setIsDriveImporting(false);
+      setDriveUploadProgress(null);
     }
   }
 
@@ -409,16 +468,26 @@ export default function StudioAdmin({ user }: { user: { email: string; name: str
             </div>
           ) : null}
 
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            <button className="flex h-14 w-full items-center justify-center gap-2 rounded-lg bg-studio px-4 font-black text-ink ring-1 ring-black/10 disabled:opacity-60" disabled={isImporting || isServerImporting} onClick={handleImport}>
-              {isImporting ? <Loader2 className="animate-spin" size={18} /> : <FolderUp size={18} />}
-              {isImporting ? "Import..." : "Essai rapide"}
-            </button>
-            <button className="flex h-14 w-full items-center justify-center gap-2 rounded-lg bg-ink px-4 font-black text-white disabled:opacity-60" disabled={isImporting || isServerImporting} onClick={handleServerImport}>
-              {isServerImporting ? <Loader2 className="animate-spin" size={18} /> : <FolderUp size={18} />}
-              {isServerImporting ? "Creation..." : "Creer la galerie client"}
-            </button>
-          </div>
+           <div className="mt-5 grid gap-3 sm:grid-cols-3">
+             <button className="flex h-14 w-full items-center justify-center gap-2 rounded-lg bg-studio px-4 font-black text-ink ring-1 ring-black/10 disabled:opacity-60" disabled={isImporting || isServerImporting} onClick={handleImport}>
+               {isImporting ? <Loader2 className="animate-spin" size={18} /> : <FolderUp size={18} />}
+               {isImporting ? "Import..." : "Essai rapide"}
+             </button>
+             <button className="flex h-14 w-full items-center justify-center gap-2 rounded-lg bg-ink px-4 font-black text-white disabled:opacity-60" disabled={isImporting || isServerImporting} onClick={handleServerImport}>
+               {isServerImporting ? <Loader2 className="animate-spin" size={18} /> : <FolderUp size={18} />}
+               {isServerImporting ? "Creation..." : "Creer la galerie client"}
+             </button>
+             <button className="flex h-14 w-full items-center justify-center gap-2 rounded-lg bg-green-600 px-4 font-black text-white disabled:opacity-60" disabled={!driveUrl || isImporting || isServerImporting} onClick={handleDriveImport}>
+               <Cloud size={18} />
+               {isDriveImporting ? "Import..." : "Importer depuis Drive"}
+             </button>
+           </div>
+           {driveUploadProgress && (
+             <div className="mt-3 rounded-lg bg-white/8 p-3">
+               <p className="text-sm font-bold text-ink">Upload en cours : {driveUploadProgress.progress}%</p>
+               <p className="text-xs text-ink/60">Projet : {driveUploadProgress.projectId}</p>
+             </div>
+           )}
           {message ? <p className="mt-3 rounded-lg bg-leaf/10 px-3 py-2 text-sm font-bold text-leaf">{message}</p> : null}
         </section>
 
