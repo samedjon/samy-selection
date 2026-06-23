@@ -9,7 +9,7 @@ export function isCloudinaryConfigured(): boolean {
     && !name.includes("votre-nom") && !key.includes("votre-api");
 }
 
-function getConfig() {
+export function getConfig() {
   return {
     cloud_name: process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || process.env.CLOUDINARY_CLOUD_NAME || "",
     api_key: process.env.CLOUDINARY_API_KEY || "",
