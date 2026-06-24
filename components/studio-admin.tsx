@@ -268,8 +268,10 @@ export default function StudioAdmin({ user }: { user: { email: string; name: str
     setDriveUploadProgress(null);
     
     try {
-      const response = await fetch(`/api/admin/drive-import?driveUrl=${encodeURIComponent(driveUrl)}`, {
+      const response = await fetch(`/api/admin/drive-public-import`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ driveUrl }),
       });
       let payload: any = { ok: false, message: "Réponse serveur vide." };
       try {
@@ -284,7 +286,7 @@ export default function StudioAdmin({ user }: { user: { email: string; name: str
         return;
       }
 
-      setMessage(`Projet Drive "${payload.project.coupleName}" importé : ${payload.files} image(s). Ouvre le portail client.`);
+      setMessage(`Projet Drive "${payload.project?.coupleName || payload.projectId}" importé : ${payload.files} image(s). Ouvre le portail client.`);
       await refreshServerProjects();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Import Drive impossible.");
