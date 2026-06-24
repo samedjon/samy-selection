@@ -1,4 +1,6 @@
 import "server-only";
+import { Readable } from "stream";
+import { ReadableStream } from "stream/web";
 
 /**
  * Google Drive API avec clé API publique
@@ -157,7 +159,8 @@ export async function downloadDriveFile(fileId: string): Promise<NodeJS.Readable
     throw new Error(`Failed to download file: ${response.status} - ${error}`);
   }
 
-  return response.body as NodeJS.ReadableStream;
+  // Convert Web ReadableStream to Node.js ReadableStream
+  return Readable.fromWeb(response.body as unknown as ReadableStream<Uint8Array>);
 }
 
 /**
