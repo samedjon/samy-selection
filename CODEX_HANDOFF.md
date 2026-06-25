@@ -37,6 +37,38 @@ Date : 25 juin 2026
 - `npm run build` : OK
 - Warnings restants : `<img>` au lieu de `next/image`, et un warning hook React deja existant.
 
+## Update Codex - 25 juin 2026, commit `67a838d`
+
+Probleme observe en production apres deploy `e490434` :
+
+- `drive-public-import` en mode synchrone renvoyait `502` apres environ 36 secondes.
+- Cause confirmee : la fonction Netlify essayait de scanner, telecharger, uploader Cloudinary et creer le projet en un seul appel. Le dossier de test contient 1125 images, donc le traitement depassait le temps disponible.
+
+Correctif pousse :
+
+- `app/api/admin/drive-public-import/route.ts`
+  - Ajout de `mode: "scan"` : retourne `projectName` + liste des images Drive sans upload.
+  - Ajout de `mode: "upload-batch"` : telecharge et upload seulement un lot d'images vers Cloudinary.
+  - Ajout de `mode: "create-project"` : cree le projet Supabase a partir des photos Cloudinary deja uploadees.
+  - L'ancien mode complet reste en place par compatibilite, mais l'UI ne l'utilise plus.
+- `components/studio-admin.tsx`
+  - Le bouton "Importer depuis Drive" orchestre maintenant :
+    1. scan Drive,
+    2. uploads par lots de 8 images,
+    3. creation finale du projet.
+  - La progression affiche `x/n image(s)`.
+
+Tests prod effectues apres deploy :
+
+- Scan Drive sur `1zTh5-uv-IVHgM-oFyqssrDwiqQ10-Ecz` : OK, 1125 images detectees.
+- Upload batch d'une image Drive vers Cloudinary : OK.
+- Creation d'un projet Supabase minimal avec une photo Cloudinary : OK.
+- Suppression immediate du projet test : OK.
+
+Point restant :
+
+- Le batch actuel depend de la page admin ouverte. Si le navigateur est ferme, l'import s'arrete. Pour une vraie reprise automatique sur 2000+ images, passer ensuite a une table `import_jobs` + worker externe ou GitHub Actions/QStash.
+
 ## Action Google la plus rapide
 
 Depuis Google Cloud Console, ouvrir Cloud Shell dans le bon compte, puis executer :
@@ -74,4 +106,3 @@ Option simple et robuste a court terme :
 - Partager chaque dossier Drive avec l'email du service account.
 - Stocker la cle JSON du service account en variable Netlify/GitHub secret.
 - Faire tourner le worker via GitHub Actions ou une machine locale du studio, pas dans une fonction Netlify longue.
-
