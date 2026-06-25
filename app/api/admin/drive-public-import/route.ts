@@ -14,6 +14,26 @@ import { logInfo, logError } from "@/lib/session-logger";
 
 export const runtime = "nodejs";
 
+type DriveImportItem = {
+  id: string;
+  name: string;
+  relativePath: string;
+};
+
+type CloudinaryPhotoInput = {
+  originalRelativePath: string;
+  watermarkedUrl: string;
+  cloudinaryPublicId: string;
+};
+
+function cloudinaryFolderName(projectName: string): string {
+  return projectName.replace(/[^a-z0-9]/gi, "-").toLowerCase();
+}
+
+function publicIdForFile(prefix: string, item: DriveImportItem): string {
+  return `${prefix}-${Date.now()}-${item.name.replace(/[^a-z0-9.]/gi, "-")}`;
+}
+
 /**
  * Import depuis Google Drive avec clé API publique
  * Fonctionne avec les dossiers partagés en LECTURE PUBLIQUE
@@ -25,9 +45,15 @@ export async function POST(request: Request) {
     if (authError) return authError;
 
     const { searchParams } = new URL(request.url);
-    const driveUrl = searchParams.get("driveUrl") || (await request.json()).driveUrl;
+    const body = await request.json().catch(() => ({}));
+    const mode = body.mode || "full";
+    const driveUrl = searchParams.get("driveUrl") || body.driveUrl;
     if (!driveUrl) {
       return NextResponse.json({ ok: false, message: "Lien Google Drive manquant." }, { status: 400 });
+    }
+
+    if (!isCloudinaryConfigured()) {
+      return NextResponse.json({ ok: false, message: "Cloudinary non configuré. Vérifie les variables CLOUDINARY_* dans Netlify." }, { status: 500 });
     }
 
     // Vérifie que la clé API est configurée
@@ -43,6 +69,76 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, message: "Lien Google Drive invalide." }, { status: 400 });
     }
 
+    if (mode === "upload-batch") {
+      const items = Array.isArray(body.items) ? body.items as DriveImportItem[] : [];
+      const projectName = String(body.projectName || "Projet Drive");
+      const folder = cloudinaryFolderName(projectName);
+      const prefix = String(body.batchPrefix || folder);
+      const cloudinaryPhotos: CloudinaryPhotoInput[] = [];
+      const uploadedFiles: DriveImportItem[] = [];
+
+      for (const item of items) {
+        try {
+          const stream = await downloadDriveFile(item.id);
+          const result = await streamUploadToCloudinary(stream, folder, publicIdForFile(prefix, item));
+          uploadedFiles.push(item);
+          cloudinaryPhotos.push({
+            originalRelativePath: item.relativePath,
+            watermarkedUrl: result.watermarkedUrl,
+            cloudinaryPublicId: result.publicId,
+          });
+        } catch (error) {
+          console.error(`Failed to upload ${item.name}:`, error);
+        }
+      }
+
+      return NextResponse.json({
+        ok: true,
+        uploaded: uploadedFiles.length,
+        failed: items.length - uploadedFiles.length,
+        cloudinaryPhotos
+      });
+    }
+
+    if (mode === "create-project") {
+      const projectName = String(body.projectName || "Projet Drive");
+      const cloudinaryPhotos = Array.isArray(body.cloudinaryPhotos) ? body.cloudinaryPhotos as CloudinaryPhotoInput[] : [];
+      if (cloudinaryPhotos.length === 0) {
+        return NextResponse.json({ ok: false, message: "Aucune photo Cloudinary à enregistrer." }, { status: 400 });
+      }
+
+      const project = await createServerProject({
+        accessCode: String(body.accessCode || "0000"),
+        eventDate: String(body.eventDate || new Date().toISOString().slice(0, 10)),
+        eventType: String(body.eventType || "Evenement"),
+        files: [],
+        notificationEmail: String(body.notificationEmail || ""),
+        notificationWhatsapp: String(body.notificationWhatsapp || ""),
+        driveUrl,
+        projectName,
+        quotas: {
+          start: Number(body.quotas?.start ?? 100),
+          premium: Number(body.quotas?.premium ?? 10),
+          enlargement: Number(body.quotas?.enlargement ?? 3)
+        },
+        venue: String(body.venue || "Drive Import"),
+        cloudinaryPhotos,
+      });
+
+      await logInfo("drive-public-import", "Projet Drive créé depuis lots", {
+        projectId: project.id,
+        projectName: project.coupleName,
+        filesCount: cloudinaryPhotos.length,
+      });
+
+      return NextResponse.json({
+        ok: true,
+        project,
+        files: cloudinaryPhotos.length,
+        message: `Projet créé avec ${cloudinaryPhotos.length} images`
+      });
+    }
+
     // Construire l'arbre du dossier Drive
     const drive = await buildDriveTree(folderId);
     const flattened = flattenDriveTree(drive);
@@ -52,7 +148,20 @@ export async function POST(request: Request) {
     }
 
     const projectName = drive.name || "Projet Drive";
-    const cloudinaryFolder = projectName.replace(/[^a-z0-9]/gi, "-").toLowerCase();
+    if (mode === "scan") {
+      return NextResponse.json({
+        ok: true,
+        projectName,
+        files: flattened.length,
+        items: flattened.map((item) => ({
+          id: item.file.id,
+          name: item.file.name,
+          relativePath: item.relativePath
+        }))
+      });
+    }
+
+    const cloudinaryFolder = cloudinaryFolderName(projectName);
 
     // Upload vers Cloudinary
     const cloudinaryPhotos: any[] = [];

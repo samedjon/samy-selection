@@ -25,6 +25,16 @@ type BrowserDirectoryEntry = BrowserEntry & {
 type BrowserDataTransferItem = DataTransferItem & {
   webkitGetAsEntry?: () => BrowserEntry | null;
 };
+type DriveImportItem = {
+  id: string;
+  name: string;
+  relativePath: string;
+};
+type DriveCloudinaryPhoto = {
+  originalRelativePath: string;
+  watermarkedUrl: string;
+  cloudinaryPublicId: string;
+};
 
 const today = new Date().toISOString().slice(0, 10);
 const eventTypes = ["Mariage", "Anniversaire", "Bapteme", "Communion", "Deuil", "Ceremonie", "Autre"];
@@ -268,25 +278,95 @@ export default function StudioAdmin({ user }: { user: { email: string; name: str
     setDriveUploadProgress(null);
     
     try {
-      const response = await fetch(`/api/admin/drive-public-import`, {
+      setMessage("Analyse du dossier Google Drive...");
+      const scanResponse = await fetch(`/api/admin/drive-public-import`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ driveUrl }),
+        body: JSON.stringify({ driveUrl, mode: "scan" }),
       });
-      let payload: any = { ok: false, message: "Réponse serveur vide." };
+      let scanPayload: any = { ok: false, message: "Réponse serveur vide." };
       try {
-        payload = await response.json();
+        scanPayload = await scanResponse.json();
       } catch {
-        const text = await response.text().catch(() => "");
-        setMessage(text ? `Réponse inattendue: ${text.slice(0, 200)}` : `Erreur serveur (${response.status}).`);
+        const text = await scanResponse.text().catch(() => "");
+        setMessage(text ? `Réponse inattendue: ${text.slice(0, 200)}` : `Erreur serveur (${scanResponse.status}).`);
         return;
       }
-      if (!response.ok || !payload.ok) {
-        setMessage(payload.message ?? "Import Drive impossible.");
+      if (!scanResponse.ok || !scanPayload.ok) {
+        setMessage(scanPayload.message ?? "Analyse Drive impossible.");
         return;
       }
 
-      setMessage(`Projet Drive "${payload.project?.coupleName || payload.projectId}" importé : ${payload.files} image(s). Ouvre le portail client.`);
+      const items = (scanPayload.items ?? []) as DriveImportItem[];
+      if (items.length === 0) {
+        setMessage("Aucune image trouvée dans ce dossier Drive.");
+        return;
+      }
+
+      const batchSize = 8;
+      const cloudinaryPhotos: DriveCloudinaryPhoto[] = [];
+      const projectNameFromDrive = String(scanPayload.projectName || "Projet Drive");
+      setMessage(`Import Drive en cours : 0/${items.length} image(s). Garde cette page ouverte.`);
+
+      for (let start = 0; start < items.length; start += batchSize) {
+        const batch = items.slice(start, start + batchSize);
+        const batchResponse = await fetch(`/api/admin/drive-public-import`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            driveUrl,
+            mode: "upload-batch",
+            projectName: projectNameFromDrive,
+            batchPrefix: projectNameFromDrive,
+            items: batch
+          }),
+        });
+        const batchPayload = await batchResponse.json().catch(() => ({ ok: false, message: "Réponse serveur vide." }));
+        if (!batchResponse.ok || !batchPayload.ok) {
+          setMessage(batchPayload.message ?? `Import interrompu au lot ${Math.floor(start / batchSize) + 1}.`);
+          return;
+        }
+
+        cloudinaryPhotos.push(...((batchPayload.cloudinaryPhotos ?? []) as DriveCloudinaryPhoto[]));
+        const progress = Math.round((Math.min(start + batch.length, items.length) / items.length) * 100);
+        setDriveUploadProgress({ projectId: projectNameFromDrive, progress });
+        setMessage(`Import Drive en cours : ${Math.min(start + batch.length, items.length)}/${items.length} image(s).`);
+      }
+
+      if (cloudinaryPhotos.length === 0) {
+        setMessage("Aucune image n'a pu être envoyée vers Cloudinary.");
+        return;
+      }
+
+      setMessage("Création de la galerie client...");
+      const createResponse = await fetch(`/api/admin/drive-public-import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          driveUrl,
+          mode: "create-project",
+          projectName: projectName.trim() || projectNameFromDrive,
+          eventType: resolvedEventType || "Evenement",
+          eventDate,
+          venue: resolvedVenue,
+          accessCode: /^\d{4}$/.test(accessCode) ? accessCode : "0000",
+          notificationEmail,
+          notificationWhatsapp,
+          quotas: {
+            start: quotaStart,
+            premium: quotaPremium,
+            enlargement: quotaEnlargement
+          },
+          cloudinaryPhotos
+        }),
+      });
+      const createPayload = await createResponse.json().catch(() => ({ ok: false, message: "Réponse serveur vide." }));
+      if (!createResponse.ok || !createPayload.ok) {
+        setMessage(createPayload.message ?? "Création du projet Drive impossible.");
+        return;
+      }
+
+      setMessage(`Projet Drive "${createPayload.project?.coupleName || projectNameFromDrive}" importé : ${cloudinaryPhotos.length} image(s). Ouvre le portail client.`);
       await refreshServerProjects();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Import Drive impossible.");
