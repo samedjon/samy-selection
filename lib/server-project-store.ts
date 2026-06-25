@@ -248,7 +248,7 @@ async function createProjectInSupabase(input: CreateServerProjectInput, photos: 
         .insert({
           folder_id: folderIdMap.get(photo.folderId) || folderRows[0].id,
           filename: photo.filename,
-          cloudinary_public_id: "",
+          cloudinary_public_id: photo.cloudinaryPublicId || "",
           watermarked_url: photo.watermarkedUrl,
           original_url: photo.relativePath || "",
           display_order: index + 1
@@ -365,7 +365,8 @@ export async function createServerProject(input: CreateServerProjectInput): Prom
   const imageFiles = input.files.filter(
     ({ file }) => file.type.startsWith("image/") || /\.(jpe?g|png|webp|gif|avif)$/i.test(file.name)
   );
-  if (imageFiles.length === 0) {
+  const cloudinaryPhotos = input.cloudinaryPhotos ?? [];
+  if (imageFiles.length === 0 && cloudinaryPhotos.length === 0) {
     throw new Error("Aucune image valide dans le dossier choisi.");
   }
 
@@ -375,7 +376,10 @@ export async function createServerProject(input: CreateServerProjectInput): Prom
   const passwordHash = await bcrypt.hash(input.accessCode, 10);
 
   const folderNames = Array.from(
-    new Set(imageFiles.map(({ relativePath }) => getFolderName(relativePath)))
+    new Set([
+      ...imageFiles.map(({ relativePath }) => getFolderName(relativePath)),
+      ...cloudinaryPhotos.map((photo) => getFolderName(photo.originalRelativePath))
+    ])
   );
 
   const folders = buildFolderHierarchy(folderNames, projectId);
@@ -422,6 +426,7 @@ export async function createServerProject(input: CreateServerProjectInput): Prom
         id: `${projectId}-photo-${index + 1}-${randomUUID().slice(0, 8)}`,
         filename: item.file.name,
         folderId,
+        cloudinaryPublicId: cloudinaryEntry.publicId,
         relativePath: item.relativePath,
         watermarkedUrl: cloudinaryEntry.url
       });
@@ -441,6 +446,22 @@ export async function createServerProject(input: CreateServerProjectInput): Prom
       folderId,
       relativePath: item.relativePath,
       watermarkedUrl: url
+    });
+  }
+
+  const existingRelativePaths = new Set(photos.map((photo) => photo.relativePath).filter(Boolean));
+  for (const [index, item] of cloudinaryPhotos.entries()) {
+    if (existingRelativePaths.has(item.originalRelativePath)) continue;
+
+    const parts = item.originalRelativePath.replace(/\\/g, "/").split("/").filter(Boolean);
+    const filename = parts.at(-1) || `photo-${index + 1}.jpg`;
+    photos.push({
+      id: `${projectId}-cloudinary-photo-${index + 1}-${randomUUID().slice(0, 8)}`,
+      filename,
+      folderId: folderIdForPath(item.originalRelativePath),
+      cloudinaryPublicId: item.cloudinaryPublicId,
+      relativePath: item.originalRelativePath,
+      watermarkedUrl: item.watermarkedUrl
     });
   }
 

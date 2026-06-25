@@ -11,6 +11,7 @@ export type Photo = {
   filename: string;
   folderId: string;
   watermarkedUrl: string;
+  cloudinaryPublicId?: string;
   relativePath?: string;
 };
 

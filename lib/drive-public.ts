@@ -21,14 +21,31 @@ export function extractFolderId(urlOrId: string): string | null {
   return match ? match[1] : null;
 }
 
-async function fetchWithApiKey(url: string): Promise<Response> {
-  const apiKey = process.env.GOOGLE_DRIVE_API_KEY || "";
-  return fetch(url, {
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Accept": "application/json",
-    },
-  });
+function describeGoogleDriveError(status: number, rawError: string): string {
+  let reason = "";
+  let message = rawError;
+
+  try {
+    const parsed = JSON.parse(rawError);
+    reason = parsed?.error?.details?.find((item: any) => item?.reason)?.reason || parsed?.error?.errors?.[0]?.reason || "";
+    message = parsed?.error?.message || rawError;
+  } catch {
+    // Keep the raw body.
+  }
+
+  if (reason === "SERVICE_DISABLED" || reason === "accessNotConfigured") {
+    return "Google Drive API est désactivée pour le projet Google Cloud lié à cette clé. Active drive.googleapis.com dans le projet Google Cloud, attends quelques minutes, puis relance l'import.";
+  }
+
+  if (reason === "API_KEY_SERVICE_BLOCKED") {
+    return "La clé API Google bloque Google Drive API. Dans Google Cloud Console, ajoute Google Drive API dans les restrictions d'API, ou mets temporairement les restrictions d'application sur None pour tester l'appel serveur Netlify.";
+  }
+
+  if (reason === "API_KEY_HTTP_REFERRER_BLOCKED") {
+    return "La clé API Google est bloquée par une restriction HTTP referrer. L'import est lancé côté serveur Netlify, donc teste temporairement avec restriction d'application None, ou passe à OAuth.";
+  }
+
+  return `Google Drive API error: ${status} - ${message}`;
 }
 
 /**
@@ -48,7 +65,7 @@ async function listFilesInFolder(folderId: string, pageToken?: string): Promise<
   
   if (!response.ok) {
     const error = await response.text().catch(() => "Unknown error");
-    throw new Error(`Google Drive API error: ${response.status} - ${error}`);
+    throw new Error(describeGoogleDriveError(response.status, error));
   }
 
   const data = await response.json();
@@ -78,7 +95,7 @@ async function getFolderMetadata(folderId: string): Promise<any> {
   
   if (!response.ok) {
     const error = await response.text().catch(() => "Unknown error");
-    throw new Error(`Failed to get folder metadata: ${response.status} - ${error}`);
+    throw new Error(describeGoogleDriveError(response.status, error));
   }
   return await response.json();
 }
@@ -156,7 +173,7 @@ export async function downloadDriveFile(fileId: string): Promise<NodeJS.Readable
 
   if (!response.ok) {
     const error = await response.text().catch(() => "Unknown error");
-    throw new Error(`Failed to download file: ${response.status} - ${error}`);
+    throw new Error(describeGoogleDriveError(response.status, error));
   }
 
   // Convert Web ReadableStream to Node.js ReadableStream

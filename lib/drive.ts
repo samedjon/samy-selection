@@ -1,5 +1,6 @@
 import "server-only";
 import { Readable } from "stream";
+import { ReadableStream } from "stream/web";
 
 export interface DriveFile {
   id: string;
@@ -21,7 +22,7 @@ export function isDriveConfigured(): boolean {
   return clientId !== "" && clientSecret !== "" && refreshToken !== "";
 }
 
-function getAccessToken(): string {
+async function getAccessToken(): Promise<string> {
   const clientId = process.env.GOOGLE_DRIVE_CLIENT_ID || "";
   const clientSecret = process.env.GOOGLE_DRIVE_CLIENT_SECRET || "";
   const refreshToken = process.env.GOOGLE_DRIVE_REFRESH_TOKEN || "";
@@ -32,18 +33,18 @@ function getAccessToken(): string {
   params.append("refresh_token", refreshToken);
   params.append("grant_type", "refresh_token");
 
-  const response = fetch("https://oauth2.googleapis.com/token", {
+  const response = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: params,
   });
 
-  const data = (response as any).json();
+  const data = await response.json();
+  if (!response.ok || !data.access_token) {
+    const description = data.error_description || data.error || "erreur inconnue";
+    throw new Error(`OAuth Google Drive invalide: ${description}`);
+  }
   return data.access_token;
-}
-
-function getAuthHeader(): string {
-  return `Bearer ${getAccessToken()}`;
 }
 
 export function extractFolderId(urlOrId: string): string | null {
@@ -66,7 +67,8 @@ async function listFilesInFolder(folderId: string, accessToken: string, pageToke
   });
 
   if (!response.ok) {
-    throw new Error(`Google Drive API error: ${response.status}`);
+    const error = await response.text().catch(() => "");
+    throw new Error(`Google Drive API error: ${response.status}${error ? ` - ${error}` : ""}`);
   }
 
   const data = await response.json();
@@ -95,12 +97,15 @@ async function getFolderMetadata(folderId: string, accessToken: string): Promise
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   
-  if (!response.ok) throw new Error(`Failed to get folder metadata: ${response.status}`);
+  if (!response.ok) {
+    const error = await response.text().catch(() => "");
+    throw new Error(`Failed to get folder metadata: ${response.status}${error ? ` - ${error}` : ""}`);
+  }
   return await response.json();
 }
 
 export async function buildDriveTree(folderId: string): Promise<DriveFolder> {
-  const accessToken = getAccessToken();
+  const accessToken = await getAccessToken();
   const folderMeta = await getFolderMetadata(folderId, accessToken);
   
   const root: DriveFolder = { ...folderMeta, children: [] } as DriveFolder;
@@ -149,7 +154,7 @@ export function flattenDriveTree(folder: DriveFolder, parentPath = ""): Array<{ 
 }
 
 export async function downloadDriveFile(fileId: string): Promise<Readable> {
-  const accessToken = getAccessToken();
+  const accessToken = await getAccessToken();
   const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
   
   const response = await fetch(url, {
@@ -157,10 +162,11 @@ export async function downloadDriveFile(fileId: string): Promise<Readable> {
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to download file: ${response.status}`);
+    const error = await response.text().catch(() => "");
+    throw new Error(`Failed to download file: ${response.status}${error ? ` - ${error}` : ""}`);
   }
 
-  return response.body as unknown as Readable;
+  return Readable.fromWeb(response.body as unknown as ReadableStream<Uint8Array>);
 }
 
 export async function streamUploadToCloudinary(
