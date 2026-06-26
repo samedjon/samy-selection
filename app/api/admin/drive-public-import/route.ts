@@ -76,6 +76,7 @@ export async function POST(request: Request) {
       const prefix = String(body.batchPrefix || folder);
       const cloudinaryPhotos: CloudinaryPhotoInput[] = [];
       const uploadedFiles: DriveImportItem[] = [];
+      const failedItems: Array<DriveImportItem & { error: string }> = [];
 
       for (const item of items) {
         try {
@@ -89,15 +90,20 @@ export async function POST(request: Request) {
           });
         } catch (error) {
           console.error(`Failed to upload ${item.name}:`, error);
+          failedItems.push({
+            ...item,
+            error: error instanceof Error ? error.message : "Erreur inconnue"
+          });
         }
       }
 
       return NextResponse.json({
-        ok: true,
+        ok: uploadedFiles.length > 0 || items.length === 0,
         uploaded: uploadedFiles.length,
         failed: items.length - uploadedFiles.length,
+        failedItems,
         cloudinaryPhotos
-      });
+      }, { status: uploadedFiles.length > 0 || items.length === 0 ? 200 : 500 });
     }
 
     if (mode === "create-project") {

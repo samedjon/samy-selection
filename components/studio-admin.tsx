@@ -35,12 +35,23 @@ type DriveCloudinaryPhoto = {
   watermarkedUrl: string;
   cloudinaryPublicId: string;
 };
+type DriveImportSession = {
+  cloudinaryPhotos: DriveCloudinaryPhoto[];
+  driveUrl: string;
+  items: DriveImportItem[];
+  projectName: string;
+  status: "running" | "paused" | "completed";
+  updatedAt: string;
+};
 
 const today = new Date().toISOString().slice(0, 10);
 const eventTypes = ["Mariage", "Anniversaire", "Bapteme", "Communion", "Deuil", "Ceremonie", "Autre"];
 const cities = ["Yaounde", "Douala", "Yaounde et Douala", "Autre"];
 const defaultWhatsapp = "+237 6 97 29 15 46";
 const defaultEmail = "SAMIProductions237@gmail.com";
+const driveBatchSize = 8;
+const driveBatchMaxRetries = 3;
+const driveImportStoragePrefix = "samy_drive_import_";
 
 export default function StudioAdmin({ user }: { user: { email: string; name: string } | null }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -63,6 +74,7 @@ export default function StudioAdmin({ user }: { user: { email: string; name: str
   const [isServerImporting, setIsServerImporting] = useState(false);
   const [isDriveImporting, setIsDriveImporting] = useState(false);
   const [driveUploadProgress, setDriveUploadProgress] = useState<{ projectId: string; progress: number } | null>(null);
+  const [driveResumeSession, setDriveResumeSession] = useState<DriveImportSession | null>(null);
   const [message, setMessage] = useState("");
   const [projects, setProjects] = useState<Project[]>([]);
   const [serverProjects, setServerProjects] = useState<Project[]>([]);
@@ -78,6 +90,10 @@ export default function StudioAdmin({ user }: { user: { email: string; name: str
     void refreshServerProjects();
     void refreshSelections();
   }, []);
+
+  useEffect(() => {
+    setDriveResumeSession(loadDriveImportSession(driveUrl));
+  }, [driveUrl]);
 
   useEffect(() => {
     if (!isDriveImporting || !driveUrl) return;
@@ -268,6 +284,14 @@ export default function StudioAdmin({ user }: { user: { email: string; name: str
   }
 
   async function handleDriveImport() {
+    await runDriveImport(false);
+  }
+
+  async function handleResumeDriveImport() {
+    await runDriveImport(true);
+  }
+
+  async function runDriveImport(shouldResume: boolean) {
     setMessage("");
     if (!driveUrl) {
       setMessage("Renseigne le lien Google Drive avant de continuer.");
@@ -275,65 +299,86 @@ export default function StudioAdmin({ user }: { user: { email: string; name: str
     }
 
     setIsDriveImporting(true);
-    setDriveUploadProgress(null);
     
     try {
-      setMessage("Analyse du dossier Google Drive...");
-      const scanResponse = await fetch(`/api/admin/drive-public-import`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ driveUrl, mode: "scan" }),
-      });
-      let scanPayload: any = { ok: false, message: "Réponse serveur vide." };
-      try {
-        scanPayload = await scanResponse.json();
-      } catch {
-        const text = await scanResponse.text().catch(() => "");
-        setMessage(text ? `Réponse inattendue: ${text.slice(0, 200)}` : `Erreur serveur (${scanResponse.status}).`);
-        return;
-      }
-      if (!scanResponse.ok || !scanPayload.ok) {
-        setMessage(scanPayload.message ?? "Analyse Drive impossible.");
-        return;
-      }
-
-      const items = (scanPayload.items ?? []) as DriveImportItem[];
-      if (items.length === 0) {
-        setMessage("Aucune image trouvée dans ce dossier Drive.");
-        return;
-      }
-
-      const batchSize = 8;
-      const cloudinaryPhotos: DriveCloudinaryPhoto[] = [];
-      const projectNameFromDrive = String(scanPayload.projectName || "Projet Drive");
-      setMessage(`Import Drive en cours : 0/${items.length} image(s). Garde cette page ouverte.`);
-
-      for (let start = 0; start < items.length; start += batchSize) {
-        const batch = items.slice(start, start + batchSize);
-        const batchResponse = await fetch(`/api/admin/drive-public-import`, {
+      let session = shouldResume ? loadDriveImportSession(driveUrl) : null;
+      if (!session) {
+        setDriveUploadProgress(null);
+        setMessage("Analyse du dossier Google Drive...");
+        const scanResponse = await fetch(`/api/admin/drive-public-import`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            driveUrl,
-            mode: "upload-batch",
-            projectName: projectNameFromDrive,
-            batchPrefix: projectNameFromDrive,
-            items: batch
-          }),
+          body: JSON.stringify({ driveUrl, mode: "scan" }),
         });
-        const batchPayload = await batchResponse.json().catch(() => ({ ok: false, message: "Réponse serveur vide." }));
-        if (!batchResponse.ok || !batchPayload.ok) {
-          setMessage(batchPayload.message ?? `Import interrompu au lot ${Math.floor(start / batchSize) + 1}.`);
+        let scanPayload: any = { ok: false, message: "Réponse serveur vide." };
+        try {
+          scanPayload = await scanResponse.json();
+        } catch {
+          const text = await scanResponse.text().catch(() => "");
+          setMessage(text ? `Réponse inattendue: ${text.slice(0, 200)}` : `Erreur serveur (${scanResponse.status}).`);
+          return;
+        }
+        if (!scanResponse.ok || !scanPayload.ok) {
+          setMessage(scanPayload.message ?? "Analyse Drive impossible.");
           return;
         }
 
-        cloudinaryPhotos.push(...((batchPayload.cloudinaryPhotos ?? []) as DriveCloudinaryPhoto[]));
-        const progress = Math.round((Math.min(start + batch.length, items.length) / items.length) * 100);
-        setDriveUploadProgress({ projectId: projectNameFromDrive, progress });
-        setMessage(`Import Drive en cours : ${Math.min(start + batch.length, items.length)}/${items.length} image(s).`);
+        const items = (scanPayload.items ?? []) as DriveImportItem[];
+        if (items.length === 0) {
+          setMessage("Aucune image trouvée dans ce dossier Drive.");
+          return;
+        }
+
+        session = {
+          cloudinaryPhotos: [],
+          driveUrl,
+          items,
+          projectName: String(scanPayload.projectName || "Projet Drive"),
+          status: "running",
+          updatedAt: new Date().toISOString()
+        };
       }
 
-      if (cloudinaryPhotos.length === 0) {
+      session.status = "running";
+      session.updatedAt = new Date().toISOString();
+      saveDriveImportSession(session);
+      setDriveResumeSession(session);
+
+      const uploadedPaths = new Set(session.cloudinaryPhotos.map((photo) => photo.originalRelativePath));
+      updateDriveProgress(session, uploadedPaths.size);
+      setMessage(`Import Drive en cours : ${uploadedPaths.size}/${session.items.length} image(s). Garde cette page ouverte.`);
+
+      while (uploadedPaths.size < session.items.length) {
+        const pendingBatch = session.items
+          .filter((item) => !uploadedPaths.has(item.relativePath))
+          .slice(0, driveBatchSize);
+        const batchNumber = Math.floor(uploadedPaths.size / driveBatchSize) + 1;
+        const result = await uploadDriveBatchWithRetry(session, pendingBatch, batchNumber);
+
+        if (result.cloudinaryPhotos.length === 0 && result.failedItems.length > 0) {
+          session.status = "paused";
+          session.updatedAt = new Date().toISOString();
+          saveDriveImportSession(session);
+          setDriveResumeSession(session);
+          setMessage(`Import suspendu au lot ${batchNumber}. ${uploadedPaths.size}/${session.items.length} image(s) déjà sauvegardée(s). Clique sur Reprendre pour continuer.`);
+          return;
+        }
+
+        for (const photo of result.cloudinaryPhotos) {
+          if (!uploadedPaths.has(photo.originalRelativePath)) {
+            uploadedPaths.add(photo.originalRelativePath);
+            session.cloudinaryPhotos.push(photo);
+          }
+        }
+
+        session.updatedAt = new Date().toISOString();
+        saveDriveImportSession(session);
+        setDriveResumeSession({ ...session });
+        updateDriveProgress(session, uploadedPaths.size);
+        setMessage(`Import Drive en cours : ${uploadedPaths.size}/${session.items.length} image(s).`);
+      }
+
+      if (session.cloudinaryPhotos.length === 0) {
         setMessage("Aucune image n'a pu être envoyée vers Cloudinary.");
         return;
       }
@@ -345,7 +390,7 @@ export default function StudioAdmin({ user }: { user: { email: string; name: str
         body: JSON.stringify({
           driveUrl,
           mode: "create-project",
-          projectName: projectName.trim() || projectNameFromDrive,
+          projectName: projectName.trim() || session.projectName,
           eventType: resolvedEventType || "Evenement",
           eventDate,
           venue: resolvedVenue,
@@ -357,7 +402,7 @@ export default function StudioAdmin({ user }: { user: { email: string; name: str
             premium: quotaPremium,
             enlargement: quotaEnlargement
           },
-          cloudinaryPhotos
+          cloudinaryPhotos: session.cloudinaryPhotos
         }),
       });
       const createPayload = await createResponse.json().catch(() => ({ ok: false, message: "Réponse serveur vide." }));
@@ -366,14 +411,66 @@ export default function StudioAdmin({ user }: { user: { email: string; name: str
         return;
       }
 
-      setMessage(`Projet Drive "${createPayload.project?.coupleName || projectNameFromDrive}" importé : ${cloudinaryPhotos.length} image(s). Ouvre le portail client.`);
+      clearDriveImportSession(driveUrl);
+      setDriveResumeSession(null);
+      setMessage(`Projet Drive "${createPayload.project?.coupleName || session.projectName}" importé : ${session.cloudinaryPhotos.length} image(s). Ouvre le portail client.`);
       await refreshServerProjects();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Import Drive impossible.");
+      const session = loadDriveImportSession(driveUrl);
+      if (session) {
+        session.status = "paused";
+        session.updatedAt = new Date().toISOString();
+        saveDriveImportSession(session);
+        setDriveResumeSession(session);
+      }
+      setMessage(`${error instanceof Error ? error.message : "Import Drive impossible."} Tu peux cliquer sur Reprendre pour continuer.`);
     } finally {
       setIsDriveImporting(false);
-      setDriveUploadProgress(null);
     }
+  }
+
+  function updateDriveProgress(session: DriveImportSession, uploadedCount: number) {
+    const progress = Math.round((uploadedCount / session.items.length) * 100);
+    setDriveUploadProgress({ projectId: session.projectName, progress });
+  }
+
+  async function uploadDriveBatchWithRetry(session: DriveImportSession, batch: DriveImportItem[], batchNumber: number): Promise<{ cloudinaryPhotos: DriveCloudinaryPhoto[]; failedItems: DriveImportItem[] }> {
+    let pending = batch;
+    const uploaded: DriveCloudinaryPhoto[] = [];
+
+    for (let attempt = 1; attempt <= driveBatchMaxRetries && pending.length > 0; attempt++) {
+      setMessage(`Lot ${batchNumber} : tentative ${attempt}/${driveBatchMaxRetries} (${pending.length} image(s)).`);
+      const response = await fetch(`/api/admin/drive-public-import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          driveUrl: session.driveUrl,
+          mode: "upload-batch",
+          projectName: session.projectName,
+          batchPrefix: session.projectName,
+          items: pending
+        }),
+      });
+      const payload = await response.json().catch(() => ({ ok: false, message: "Réponse serveur vide.", failedItems: pending }));
+      const uploadedPhotos = (payload.cloudinaryPhotos ?? []) as DriveCloudinaryPhoto[];
+      uploaded.push(...uploadedPhotos);
+      const uploadedPaths = new Set(uploadedPhotos.map((photo) => photo.originalRelativePath));
+      const failedItems = Array.isArray(payload.failedItems)
+        ? (payload.failedItems as DriveImportItem[])
+        : pending.filter((item) => !uploadedPaths.has(item.relativePath));
+
+      if (response.ok && uploadedPhotos.length === pending.length) {
+        pending = [];
+        break;
+      }
+
+      pending = failedItems.length ? failedItems : pending.filter((item) => !uploadedPaths.has(item.relativePath));
+      if (pending.length > 0 && attempt < driveBatchMaxRetries) {
+        await wait(1200 * attempt);
+      }
+    }
+
+    return { cloudinaryPhotos: uploaded, failedItems: pending };
   }
 
   async function handleDrop(event: React.DragEvent<HTMLLabelElement>) {
@@ -564,9 +661,27 @@ export default function StudioAdmin({ user }: { user: { email: string; name: str
                {isDriveImporting ? "Import..." : "Importer depuis Drive"}
              </button>
            </div>
+           {driveResumeSession ? (
+             <div className="mt-3 rounded-lg bg-gold/15 p-3 ring-1 ring-gold/30">
+               <div className="flex flex-wrap items-center justify-between gap-3">
+                 <div>
+                   <p className="text-sm font-black text-ink">Import Drive récupérable</p>
+                   <p className="mt-1 text-xs font-bold text-ink/60">
+                     {driveResumeSession.cloudinaryPhotos.length}/{driveResumeSession.items.length} image(s) déjà envoyée(s) - {driveResumeSession.projectName}
+                   </p>
+                 </div>
+                 <button className="rounded-lg bg-gold px-4 py-2 text-sm font-black text-ink disabled:opacity-60" disabled={isDriveImporting} onClick={handleResumeDriveImport}>
+                   {isDriveImporting ? "Reprise..." : "Reprendre"}
+                 </button>
+               </div>
+             </div>
+           ) : null}
            {driveUploadProgress && (
-             <div className="mt-3 rounded-lg bg-white/8 p-3">
-               <p className="text-sm font-bold text-ink">Upload en cours : {driveUploadProgress.progress}%</p>
+             <div className="mt-3 rounded-lg bg-white p-3 ring-1 ring-black/10">
+               <div className="h-3 overflow-hidden rounded-full bg-studio">
+                 <div className="h-full rounded-full bg-green-600 transition-all" style={{ width: `${driveUploadProgress.progress}%` }} />
+               </div>
+               <p className="mt-2 text-sm font-bold text-ink">Upload en cours : {driveUploadProgress.progress}%</p>
                <p className="text-xs text-ink/60">Projet : {driveUploadProgress.projectId}</p>
              </div>
            )}
@@ -818,4 +933,36 @@ function withRelativePath(file: File, relativePath: string): File {
     });
     return clone;
   }
+}
+
+function driveImportStorageKey(driveUrl: string): string {
+  return `${driveImportStoragePrefix}${btoa(unescape(encodeURIComponent(driveUrl.trim()))).replace(/[=+/]/g, "")}`;
+}
+
+function loadDriveImportSession(driveUrl: string): DriveImportSession | null {
+  if (!driveUrl.trim() || typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(driveImportStorageKey(driveUrl));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as DriveImportSession;
+    if (parsed.driveUrl !== driveUrl || parsed.status === "completed") return null;
+    if (!Array.isArray(parsed.items) || !Array.isArray(parsed.cloudinaryPhotos)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveDriveImportSession(session: DriveImportSession) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(driveImportStorageKey(session.driveUrl), JSON.stringify(session));
+}
+
+function clearDriveImportSession(driveUrl: string) {
+  if (!driveUrl.trim() || typeof window === "undefined") return;
+  window.localStorage.removeItem(driveImportStorageKey(driveUrl));
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
