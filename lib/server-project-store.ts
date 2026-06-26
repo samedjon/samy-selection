@@ -222,44 +222,53 @@ async function createProjectInSupabase(input: CreateServerProjectInput, photos: 
 
   const projectId = projectRow.id;
 
-  const folderRows = await Promise.all(
-    folders.map(async (folder, index) => {
-      const { data, error } = await supabase
-        .from("folders")
-        .insert({
-          project_id: projectId,
-          name: folder.name,
-          display_order: index + 1
-        })
-        .select("id")
-        .single();
+  const { data: insertedFolders, error: foldersError } = await supabase
+    .from("folders")
+    .insert(folders.map((folder, index) => ({
+      project_id: projectId,
+      name: folder.name,
+      parent_id: folder.parentId ? null : null,
+      display_order: index + 1
+    })))
+    .select("id, name, display_order");
 
-      if (error) throw error;
-      return { ...folder, id: data.id };
-    })
-  );
+  if (foldersError || !insertedFolders) {
+    throw new Error(`Supabase folders insert failed: ${foldersError?.message || "unknown"}`);
+  }
+
+  const folderRows = folders.map((folder, index) => ({
+    ...folder,
+    id: insertedFolders[index]?.id || folder.id
+  }));
 
   const folderIdMap = new Map(folders.map((f, i) => [f.id, folderRows[i].id]));
 
-  const photoRows = await Promise.all(
-    photos.map(async (photo, index) => {
-      const { data, error } = await supabase
-        .from("photos")
-        .insert({
-          folder_id: folderIdMap.get(photo.folderId) || folderRows[0].id,
-          filename: photo.filename,
-          cloudinary_public_id: photo.cloudinaryPublicId || "",
-          watermarked_url: photo.watermarkedUrl,
-          original_url: photo.relativePath || "",
-          display_order: index + 1
-        })
-        .select("id")
-        .single();
+  const photoRows: Photo[] = [];
+  const photoInsertRows = photos.map((photo, index) => ({
+    folder_id: folderIdMap.get(photo.folderId) || folderRows[0].id,
+    filename: photo.filename,
+    cloudinary_public_id: photo.cloudinaryPublicId || "",
+    watermarked_url: photo.watermarkedUrl,
+    original_url: photo.relativePath || "",
+    display_order: index + 1
+  }));
 
-      if (error) throw error;
-      return { ...photo, id: data.id };
-    })
-  );
+  for (let start = 0; start < photoInsertRows.length; start += 500) {
+    const batch = photoInsertRows.slice(start, start + 500);
+    const { data, error } = await supabase
+      .from("photos")
+      .insert(batch)
+      .select("id");
+
+    if (error || !data) {
+      throw new Error(`Supabase photos insert failed: ${error?.message || "unknown"}`);
+    }
+
+    for (const [index, row] of data.entries()) {
+      const original = photos[start + index];
+      photoRows.push({ ...original, id: row.id });
+    }
+  }
 
   return {
     id: projectId,
