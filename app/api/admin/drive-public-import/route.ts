@@ -34,6 +34,10 @@ function publicIdForFile(prefix: string, item: DriveImportItem): string {
   return `${prefix}-${Date.now()}-${item.name.replace(/[^a-z0-9.]/gi, "-")}`;
 }
 
+function driveProxyUrl(fileId: string): string {
+  return `/api/drive-image/${encodeURIComponent(fileId)}`;
+}
+
 /**
  * Import depuis Google Drive avec clé API publique
  * Fonctionne avec les dossiers partagés en LECTURE PUBLIQUE
@@ -52,10 +56,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, message: "Lien Google Drive manquant." }, { status: 400 });
     }
 
-    if (!isCloudinaryConfigured()) {
-      return NextResponse.json({ ok: false, message: "Cloudinary non configuré. Vérifie les variables CLOUDINARY_* dans Netlify." }, { status: 500 });
-    }
-
     // Vérifie que la clé API est configurée
     if (!isDrivePublicConfigured()) {
       return NextResponse.json({
@@ -67,6 +67,12 @@ export async function POST(request: Request) {
     const folderId = extractFolderId(driveUrl);
     if (!folderId) {
       return NextResponse.json({ ok: false, message: "Lien Google Drive invalide." }, { status: 400 });
+    }
+
+    if (mode === "upload-batch" || mode === "full") {
+      if (!isCloudinaryConfigured()) {
+        return NextResponse.json({ ok: false, message: "Cloudinary non configuré. Vérifie les variables CLOUDINARY_* dans Netlify." }, { status: 500 });
+      }
     }
 
     if (mode === "upload-batch") {
@@ -164,6 +170,45 @@ export async function POST(request: Request) {
           name: item.file.name,
           relativePath: item.relativePath
         }))
+      });
+    }
+
+    if (mode === "create-drive-project") {
+      const cloudinaryPhotos = flattened.map((item) => ({
+        originalRelativePath: item.relativePath,
+        watermarkedUrl: driveProxyUrl(item.file.id),
+        cloudinaryPublicId: `drive:${item.file.id}`,
+      }));
+
+      const project = await createServerProject({
+        accessCode: String(body.accessCode || "0000"),
+        eventDate: String(body.eventDate || new Date().toISOString().slice(0, 10)),
+        eventType: String(body.eventType || "Evenement"),
+        files: [],
+        notificationEmail: String(body.notificationEmail || ""),
+        notificationWhatsapp: String(body.notificationWhatsapp || ""),
+        driveUrl,
+        projectName: String(body.projectName || projectName),
+        quotas: {
+          start: Number(body.quotas?.start ?? 100),
+          premium: Number(body.quotas?.premium ?? 10),
+          enlargement: Number(body.quotas?.enlargement ?? 3)
+        },
+        venue: String(body.venue || "Drive Import"),
+        cloudinaryPhotos,
+      });
+
+      await logInfo("drive-public-import", "Projet Drive direct créé", {
+        projectId: project.id,
+        projectName: project.coupleName,
+        filesCount: cloudinaryPhotos.length,
+      });
+
+      return NextResponse.json({
+        ok: true,
+        project,
+        files: cloudinaryPhotos.length,
+        message: `Projet Drive direct créé avec ${cloudinaryPhotos.length} images`
       });
     }
 

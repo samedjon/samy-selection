@@ -301,6 +301,43 @@ export default function StudioAdmin({ user }: { user: { email: string; name: str
     setIsDriveImporting(true);
     
     try {
+      if (!shouldResume) {
+        setDriveUploadProgress({ projectId: "Google Drive", progress: 5 });
+        setMessage("Analyse du dossier Drive et création de la galerie directe...");
+        const response = await fetch(`/api/admin/drive-public-import`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            driveUrl,
+            mode: "create-drive-project",
+            projectName: projectName.trim() || undefined,
+            eventType: resolvedEventType || "Evenement",
+            eventDate,
+            venue: resolvedVenue,
+            accessCode: /^\d{4}$/.test(accessCode) ? accessCode : "0000",
+            notificationEmail,
+            notificationWhatsapp,
+            quotas: {
+              start: quotaStart,
+              premium: quotaPremium,
+              enlargement: quotaEnlargement
+            }
+          }),
+        });
+        const payload = await response.json().catch(() => ({ ok: false, message: "Réponse serveur vide." }));
+        if (!response.ok || !payload.ok) {
+          setMessage(payload.message ?? "Création Drive directe impossible.");
+          return;
+        }
+
+        clearDriveImportSession(driveUrl);
+        setDriveResumeSession(null);
+        setDriveUploadProgress({ projectId: payload.project?.coupleName || "Google Drive", progress: 100 });
+        setMessage(`Galerie Drive "${payload.project?.coupleName || "Projet Drive"}" créée : ${payload.files} image(s). Ouvre le portail client.`);
+        await refreshServerProjects();
+        return;
+      }
+
       let session = shouldResume ? loadDriveImportSession(driveUrl) : null;
       if (!session) {
         setDriveUploadProgress(null);
